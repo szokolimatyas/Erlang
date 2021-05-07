@@ -23,6 +23,7 @@ library
                     , CoreErlang.A
                     , CoreErlang.B
                     , CoreErlang.NoAnnType
+                    , CoreErlang.SimpleType
                     , CoreErlang.Translate
                     , CoreErlang.Pretty
 

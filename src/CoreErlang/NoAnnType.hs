@@ -39,10 +39,25 @@ data Pattern
   | PatternT [AnnotatedPattern]
   | PatternL [AnnotatedPattern]
   | PatternP [AnnotatedPattern] AnnotatedPattern
+  | PatternMap PMap
   | PatternBitstringPattern [BitstringPattern]
   | PatternAlias VariableName AnnotatedPattern
   deriving (Show)
 
+data PMMap
+  = PMMap AnnotatedPattern AnnotatedPattern
+  deriving (Show)
+
+-- PMap
+--   ~{ k1 := v1, .. kn -> vn }~
+--   ~{ k1 := v2 , .. | ek }~
+data PMap
+  = PMap [PMMap]
+  | PMapP [PMMap] AnnotatedPattern
+  deriving (Show)
+
+-- BitstringPattern:
+--   # < p > ( e 1 , . . . , e n ) (n ≥ 0)
 -- BitstringPattern:
 --   # < p > ( e 1 , . . . , e n ) (n ≥ 0)
 data BitstringPattern = BitstringPattern AnnotatedPattern [Expression]
@@ -86,6 +101,7 @@ data SingleExpression
   | SEFunctionName FunctionName
   | SETuple Tuple
   | SEList List
+  | SEMap Map
   | SEBinary Binary
   | SELet Let
   | SECase Case
@@ -113,6 +129,22 @@ data List
   = ListL [Expression]
   | ListP [Expression] Expression
   deriving (Show)
+
+data MMap
+  = InsertM Expression Expression
+  | UpdateM Expression Expression
+  deriving (Show)
+
+-- Map
+--   ~{ k1 (=> or :=) v1, .. kn -> vn }~
+--   ~{ e1 (=> or :=) e2 , .. | ek }~
+data Map
+  = Map [MMap]
+  | MapP [MMap] Expression
+  deriving (Show)
+
+-- Binary:
+--   # { Bitstring 1 , . . . , Bitstring n } # (n ≥ 0)
 
 -- Binary:
 --   # { Bitstring 1 , . . . , Bitstring n } # (n ≥ 0)
