@@ -1,0 +1,64 @@
+cabal-version:      2.4
+name:               Erlang
+version:            0.1.0.0
+synopsis:           Erlang syntax, CoreErlang syntax
+
+-- A longer description of the package.
+-- description:
+homepage:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+license:            NONE
+author:             EMQ-YangM
+maintainer:         yangm@emqx.io
+
+-- A copyright notice.
+-- copyright:
+category:           Language
+extra-source-files: CHANGELOG.md
+
+library
+    exposed-modules:  CoreErlang.Type
+                    , CoreErlang.A
+                    , CoreErlang.B
+                    , CoreErlang.NoAnnType
+                    , CoreErlang.Translate
+                    , CoreErlang.Pretty
+
+                    
+                    , Erlang.A
+                    , Erlang.B
+                    , Erlang.Type
+                    , Erlang.Pretty
+                    , Erlang.T
+                    , Utils
+
+    -- Modules included in this library but not exported.
+    -- other-modules: A
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+    build-depends:    base ^>=4.14.1.0
+                    , array
+                    , recursion-schemes
+                    , text
+                    , doclayout
+                    , directory
+                    , filepath
+    hs-source-dirs:   src
+    default-language: Haskell2010
+
+test-suite Erlang-test
+    default-language: Haskell2010
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          MyLibTest.hs
+    build-depends:    base ^>=4.14.1.0
+                    , Erlang
+                    , array
+                    , recursion-schemes
+                    , text
+                    , doclayout
+                    , directory
+                    , filepath

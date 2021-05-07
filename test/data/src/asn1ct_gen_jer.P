@@ -1,0 +1,684 @@
+-file("asn1ct_gen_jer.erl", 1).
+
+-module(asn1ct_gen_jer).
+
+-file("asn1_records.hrl", 1).
+
+-record(module,{pos, name, defid,
+                tagdefault = 'EXPLICIT',
+                exports = {exports, []},
+                imports = {imports, []},
+                extensiondefault = empty,
+                typeorval}).
+
+-record('ExtensionAdditionGroup',{number}).
+
+-record('SEQUENCE',{pname = false,
+                    tablecinf = false,
+                    extaddgroup,
+                    components = []}).
+
+-record('SET',{pname = false,
+               sorted = false,
+               tablecinf = false,
+               components = []}).
+
+-record('ComponentType',{pos, name, typespec, prop, tags, textual_order}).
+
+-record('ObjectClassFieldType',{classname, class, fieldname, type}).
+
+-record(typedef,{checked = false, pos, name, typespec}).
+
+-record(classdef,{checked = false, pos, name, module, typespec}).
+
+-record(valuedef,{checked = false, pos, name, type, value, module}).
+
+-record(ptypedef,{checked = false, pos, name, args, typespec}).
+
+-record(pvaluedef,{checked = false, pos, name, args, type, value}).
+
+-record(pvaluesetdef,{checked = false, pos, name, args, type, valueset}).
+
+-record(pobjectdef,{checked = false, pos, name, args, class, def}).
+
+-record(pobjectsetdef,{checked = false, pos, name, args, class, def}).
+
+-record('Constraint',{'SingleValue' = no,
+                      'SizeConstraint' = no,
+                      'ValueRange' = no,
+                      'PermittedAlphabet' = no,
+                      'ContainedSubtype' = no,
+                      'TypeConstraint' = no,
+                      'InnerSubtyping' = no,
+                      e = no,
+                      'Other' = no}).
+
+-record(simpletableattributes,{objectsetname, c_name, c_index,
+                               usedclassfield, uniqueclassfield,
+                               valueindex}).
+
+-record(type,{tag = [],
+              def,
+              constraint = [],
+              tablecinf = [],
+              inlined = no}).
+
+-record(objectclass,{fields = [], syntax}).
+
+-record('Object',{classname, gen = true, def}).
+
+-record('ObjectSet',{class, gen = true, uniquefname, set}).
+
+-record(tag,{class, number, type, form = 32}).
+
+-record(cmap,{single_value = no,
+              contained_subtype = no,
+              value_range = no,
+              size = no,
+              permitted_alphabet = no,
+              type_constraint = no,
+              inner_subtyping = no}).
+
+-record('EXTENSIONMARK',{pos, val}).
+
+-record('SymbolsFromModule',{symbols, module, objid}).
+
+-record('Externaltypereference',{pos, module, type}).
+
+-record('Externalvaluereference',{pos, module, value}).
+
+-record(seqtag,{pos :: integer(), module :: atom(), val :: atom()}).
+
+-record(state,{module, mname, tname, erule,
+               parameters = [],
+               inputmodules = [],
+               abscomppath = [],
+               recordtopname = [],
+               options, sourcedir, error_context}).
+
+-record(gen,{erule = ber :: ber | per | jer,
+             der = false :: boolean(),
+             jer = false :: boolean(),
+             aligned = false :: boolean(),
+             rec_prefix = "" :: string(),
+             macro_prefix = "" :: string(),
+             pack = record :: record | map,
+             options = [] :: [any()]}).
+
+-record(abst,{name :: module(),
+              types, values, ptypes, classes, objects, objsets}).
+
+-record(gen_state,{active = false,
+                   prefix, inc_tag_pattern, tag_pattern,
+                   inc_type_pattern, type_pattern, func_name, namelist,
+                   tobe_refed_funcs = [],
+                   gen_refed_funcs = [],
+                   generated_functions = [],
+                   suffix_index = 1,
+                   current_suffix_index}).
+
+-file("asn1ct_gen_jer.erl", 27).
+
+-export([gen_encode/2,gen_encode/3,gen_decode/2,gen_decode/3]).
+
+-export([gen_encode_prim/3]).
+
+-export([gen_dec_prim/2]).
+
+-export([gen_objectset_code/2,gen_obj_code/3]).
+
+-export([gen_inc_decode/2,gen_decode_selected/3]).
+
+-export([extaddgroup2sequence/1]).
+
+-export([dialyzer_suppressions/1]).
+
+-export([gen_encode_constructed/4]).
+
+-export([gen_encode_sequence/3]).
+
+-export([gen_decode_sequence/3]).
+
+-export([gen_encode_set/3]).
+
+-export([gen_decode_set/3]).
+
+-export([gen_encode_sof/4]).
+
+-export([gen_decode_sof/4]).
+
+-export([gen_encode_choice/3]).
+
+-export([gen_decode_choice/3]).
+
+-import(asn1ct_gen, [emit/1]).
+
+gen_encode_sequence(Gen, Typename, #type{} = D) ->
+    {_SeqOrSet, TableConsInfo, CompList0} =
+        case D#type.def of
+            #'SEQUENCE'{tablecinf = TCI, components = CL} ->
+                {'SEQUENCE', TCI, CL};
+            #'SET'{tablecinf = TCI, components = CL} ->
+                {'SET', TCI, CL}
+        end,
+    CompList = filter_complist(CompList0),
+    CompList1 =
+        case CompList of
+            {Rl1, El, Rl2} ->
+                Rl1 ++ El ++ Rl2;
+            {Rl, El} ->
+                Rl ++ El;
+            _ ->
+                CompList
+        end,
+    EncObj =
+        case TableConsInfo of
+            #simpletableattributes{usedclassfield = Used,
+                                   uniqueclassfield = Unique}
+                when Used /= Unique ->
+                false;
+            #simpletableattributes{objectsetname = ObjectSetRef,
+                                   c_name = AttrN,
+                                   c_index = N,
+                                   usedclassfield = UniqueFieldName,
+                                   uniqueclassfield = UniqueFieldName,
+                                   valueindex = _ValueIndex} ->
+                {ObjSetMod, ObjSetName} = ObjectSetRef,
+                OSDef = asn1_db:dbget(ObjSetMod, ObjSetName),
+                case (OSDef#typedef.typespec)#'ObjectSet'.gen of
+                    true ->
+                        {AttrN, N};
+                    _ ->
+                        false
+                end;
+            _ ->
+                case D#type.tablecinf of
+                    [{objfun, _} | _] ->
+                        {"got objfun through args", "ObjFun"};
+                    _ ->
+                        false
+                end
+        end,
+    CompTypes =
+        gen_enc_comptypes(Gen, Typename, CompList1, 1, EncObj, []),
+    Prefix = asn1ct_gen:get_record_name_prefix(Gen),
+    {sequence,
+     list_to_atom(lists:concat([Prefix, asn1ct_gen:list2name(Typename)])),
+     length(CompList1),
+     CompTypes}.
+
+gen_decode_sequence(_, _, _) ->
+    ok.
+
+gen_encode_set(Erules, Typename, D) when is_record(D, type) ->
+    gen_encode_sequence(Erules, Typename, D).
+
+gen_decode_set(_, _, _) ->
+    ok.
+
+gen_encode_sof(Erules, Typename, InnerTypename, D)
+    when is_record(D, type) ->
+    asn1ct_name:start(),
+    {_SeqOrSetOf, Cont} = D#type.def,
+    NameSuffix =
+        asn1ct_gen:constructed_suffix(InnerTypename, D#type.def),
+    {sof, gen_typeinfo(Erules, [NameSuffix | Typename], Cont)}.
+
+gen_decode_sof(_, _, _, _) ->
+    ok.
+
+gen_encode_choice(Erules, TypeName, D) when is_record(D, type) ->
+    {'CHOICE', CompList} = D#type.def,
+    CompList1 =
+        case CompList of
+            {Rl1, El, Rl2} ->
+                Rl1 ++ El ++ Rl2;
+            {Rl, El} ->
+                Rl ++ El;
+            _ ->
+                CompList
+        end,
+    {choice,
+     maps:from_list([ 
+                     {AltName, AltType} ||
+                         {AltName, AltType, _OptOrMand} <-
+                             gen_enc_comptypes(Erules, TypeName,
+                                               CompList1, 0, 0, [])
+                    ])}.
+
+gen_decode_choice(_, _, _) ->
+    ok.
+
+gen_enc_comptypes(Erules, TopType,
+                  [#'ComponentType'{name = Cname,
+                                    typespec = Type,
+                                    prop = Prop} |
+                   Rest],
+                  Pos, EncObj, Acc) ->
+    TypeInfo =
+        gen_enc_line(Erules, TopType, Cname, Type,
+                     "Dummy",
+                     3, Prop, EncObj),
+    gen_enc_comptypes(Erules, TopType, Rest, Pos, EncObj,
+                      [{atom_to_binary(Cname, utf8), TypeInfo, Prop} |
+                       Acc]);
+gen_enc_comptypes(_, _, [], _, _, Acc) ->
+    lists:reverse(Acc).
+
+gen_enc_classtypes(Erules, TopType,
+                   [{TName, #typedef{typespec = TSpec}} | Rest],
+                   Acc) ->
+    TypeInfo =
+        gen_enc_line(Erules, TopType, TName, TSpec,
+                     "Dummy",
+                     3, mandatory, false),
+    gen_enc_classtypes(Erules, TopType, Rest, [{TName, TypeInfo} | Acc]);
+gen_enc_classtypes(_, _, [], Acc) ->
+    lists:reverse(Acc).
+
+gen_enc_line(Erules, TopType, Cname,
+             Type =
+                 #type{constraint = C,
+                       def =
+                           #'ObjectClassFieldType'{type = {typefield, _}}},
+             Element, Indent,
+             OptOrMand = mandatory,
+             EncObj)
+    when is_list(Element) ->
+    case asn1ct_gen:get_constraint(C, componentrelation) of
+        {componentrelation, _, _} ->
+            gen_enc_line(Erules, TopType, Cname, Type, Element, Indent,
+                         OptOrMand,
+                         ["{", {curr, tmpBytes}, ",_} = "],
+                         EncObj);
+        _ ->
+            gen_enc_line(Erules, TopType, Cname, Type, Element, Indent,
+                         OptOrMand,
+                         ["{",
+                          {curr, encBytes},
+                          ",",
+                          {curr, encLen},
+                          "} = "],
+                         EncObj)
+    end;
+gen_enc_line(Erules, TopType, Cname, Type, Element, Indent, OptOrMand,
+             EncObj)
+    when is_list(Element) ->
+    gen_enc_line(Erules, TopType, Cname, Type, Element, Indent,
+                 OptOrMand,
+                 [{curr, encV}, " = "],
+                 EncObj).
+
+gen_enc_line(Erules, TopType, Cname, Type, Element, _Indent, _OptOrMand,
+             _Assign, EncObj)
+    when is_list(Element) ->
+    InnerType =
+        case Type of
+            #type{def = Def} ->
+                asn1ct_gen:get_inner(Def);
+            #'ObjectSet'{class = ExtRef} ->
+                asn1ct_gen:get_inner(ExtRef)
+        end,
+    WhatKind = asn1ct_gen:type(InnerType),
+    CR =
+        case Type of
+            #type{constraint = Constraint} ->
+                asn1ct_gen:get_constraint(Constraint, componentrelation);
+            _ ->
+                []
+        end,
+    TypeInfo =
+        case {Type, CR} of
+            {#type{def =
+                       #'ObjectClassFieldType'{type = {typefield, _},
+                                               fieldname =
+                                                   RefedFieldName}},
+             {componentrelation, _, _}} ->
+                {Name, _RestFieldNames} = RefedFieldName,
+                true = is_atom(Name),
+                {'ObjClassFieldType', EncObj, CR};
+            _ ->
+                case WhatKind of
+                    {primitive, bif} ->
+                        gen_encode_prim(jer, Type, Element);
+                    'ASN1_OPEN_TYPE' ->
+                        case Type#type.def of
+                            #'ObjectClassFieldType'{} ->
+                                gen_encode_prim(jer,
+                                                #type{def =
+                                                          'ASN1_OPEN_TYPE'},
+                                                Element);
+                            _ ->
+                                gen_encode_prim(jer, Type, Element)
+                        end;
+                    {constructed, bif} ->
+                        Typename = [Cname | TopType],
+                        gen_encode_constructed(Erules, Typename,
+                                               InnerType, Type);
+                    #'Externaltypereference'{module = Mod, type = EType} ->
+                        {typeinfo, {Mod, typeinfo_func(EType)}}
+                end
+        end,
+    TypeInfo.
+
+filter_complist(CompList) when is_list(CompList) ->
+    lists:filter(fun(#'ExtensionAdditionGroup'{}) ->
+                        false;
+                    ('ExtensionAdditionGroupEnd') ->
+                        false;
+                    (_) ->
+                        true
+                 end,
+                 CompList);
+filter_complist({Root, Ext}) ->
+    {Root, filter_complist(Ext)};
+filter_complist({Root1, Ext, Root2}) ->
+    {Root1, filter_complist(Ext), Root2}.
+
+gen_encode_constructed(Erules, Typename, InnerType, D)
+    when is_record(D, type) ->
+    case InnerType of
+        'SET' ->
+            gen_encode_set(Erules, Typename, D);
+        'SEQUENCE' ->
+            gen_encode_sequence(Erules, Typename, D);
+        'CHOICE' ->
+            gen_encode_choice(Erules, Typename, D);
+        'SEQUENCE OF' ->
+            gen_encode_sof(Erules, Typename, InnerType, D);
+        'SET OF' ->
+            gen_encode_sof(Erules, Typename, InnerType, D)
+    end.
+
+dialyzer_suppressions(_) ->
+    case asn1ct:use_legacy_types() of
+        false ->
+            ok;
+        true ->
+            suppress({ber, encode_bit_string, 4})
+    end,
+    suppress({ber, decode_selective, 2}),
+    emit(["    ok.", nl]).
+
+suppress({M, F, A} = MFA) ->
+    case asn1ct_func:is_used(MFA) of
+        false ->
+            ok;
+        true ->
+            Args =
+                [ 
+                 (lists:concat(["element(", I, ", Arg)"])) ||
+                     I <- lists:seq(1, A)
+                ],
+            emit(["    ", {call, M, F, Args}, com, nl])
+    end.
+
+gen_encode(Erules, #typedef{} = D) ->
+    gen_encode_user(Erules, D, true).
+
+gen_encode(Erules, Typename, Type) when is_record(Type, type) ->
+    InnerType = asn1ct_gen:get_inner(Type#type.def),
+    ObjFun =
+        case lists:keysearch(objfun, 1, Type#type.tablecinf) of
+            {value, {_, _Name}} ->
+                ", ObjFun";
+            false ->
+                ""
+        end,
+    case asn1ct_gen:type(InnerType) of
+        {constructed, bif} ->
+            Func = {asis, enc_func(asn1ct_gen:list2name(Typename))},
+            emit([nl, nl, nl,
+                  "%%================================",
+                  nl,
+                  "%%  ",
+                  asn1ct_gen:list2name(Typename),
+                  nl,
+                  "%%================================",
+                  nl, Func,
+                  "(Val",
+                  ObjFun,
+                  ") ->",
+                  nl,
+                  "   "]),
+            TypeInfo =
+                gen_encode_constructed(Erules, Typename, InnerType,
+                                       Type),
+            emit([{asis, TypeInfo}, ".", nl]);
+        _ ->
+            true
+    end;
+gen_encode(Erules, Tname,
+           #'ComponentType'{name = Cname, typespec = Type}) ->
+    NewTname = [Cname | Tname],
+    NewType = Type#type{tag = []},
+    gen_encode(Erules, NewTname, NewType).
+
+gen_encode_user(Erules, #typedef{} = D, _Wrapper) ->
+    Typename = [D#typedef.name],
+    Type = D#typedef.typespec,
+    InnerType = asn1ct_gen:get_inner(Type#type.def),
+    emit([nl, nl, "%%================================"]),
+    emit([nl, "%%  ", Typename]),
+    emit([nl, "%%================================", nl]),
+    FuncName = {asis, typeinfo_func(asn1ct_gen:list2name(Typename))},
+    emit([FuncName, "() ->", nl]),
+    CurrentMod = get(currmod),
+    TypeInfo =
+        case asn1ct_gen:type(InnerType) of
+            {constructed, bif} ->
+                gen_encode_constructed(Erules, Typename, InnerType,
+                                       Type);
+            {primitive, bif} ->
+                gen_encode_prim(jer, Type, "Val");
+            #'Externaltypereference'{module = CurrentMod, type = Etype} ->
+                {typeinfo, {CurrentMod, typeinfo_func(Etype)}};
+            #'Externaltypereference'{module = Emod, type = Etype} ->
+                {typeinfo, {Emod, typeinfo_func(Etype)}};
+            'ASN1_OPEN_TYPE' ->
+                gen_encode_prim(jer,
+                                Type#type{def = 'ASN1_OPEN_TYPE'},
+                                "Val")
+        end,
+    emit([{asis, TypeInfo}, ".", nl, nl]).
+
+gen_typeinfo(Erules, Typename, Type) ->
+    InnerType = asn1ct_gen:get_inner(Type#type.def),
+    CurrentMod = get(currmod),
+    case asn1ct_gen:type(InnerType) of
+        {constructed, bif} ->
+            gen_encode_constructed(Erules, Typename, InnerType, Type);
+        {primitive, bif} ->
+            gen_encode_prim(jer, Type, "Val");
+        #'Externaltypereference'{module = CurrentMod, type = Etype} ->
+            {typeinfo, {CurrentMod, typeinfo_func(Etype)}};
+        #'Externaltypereference'{module = Emod, type = Etype} ->
+            {typeinfo, {Emod, typeinfo_func(Etype)}};
+        'ASN1_OPEN_TYPE' ->
+            gen_encode_prim(jer,
+                            Type#type{def = 'ASN1_OPEN_TYPE'},
+                            "Val")
+    end.
+
+gen_encode_prim(_Erules, #type{} = D, _Value) ->
+    BitStringConstraint = get_size_constraint(D#type.constraint),
+    IntConstr = int_constr(D#type.constraint),
+    asn1ct_name:new(enumval),
+    Type =
+        case D#type.def of
+            'OCTET STRING' ->
+                maybe_legacy_octet_string();
+            'UTF8String' ->
+                string;
+            'ObjectDescriptor' ->
+                string;
+            'NumericString' ->
+                string;
+            'TeletexString' ->
+                string;
+            'T61String' ->
+                string;
+            'VideotexString' ->
+                string;
+            'GraphicString' ->
+                string;
+            'VisibleString' ->
+                string;
+            'GeneralString' ->
+                string;
+            'PrintableString' ->
+                string;
+            'IA5String' ->
+                string;
+            'UTCTime' ->
+                string;
+            'GeneralizedTime' ->
+                string;
+            B1 = 'BIT STRING' ->
+                maybe_legacy_bit_string(B1, BitStringConstraint);
+            B2 = {'BIT STRING', _NNL} ->
+                maybe_legacy_bit_string(B2, BitStringConstraint);
+            {'INTEGER', NNL} ->
+                {'INTEGER_NNL', NNL};
+            {'ENUMERATED', {NNL, Ext}} ->
+                {'ENUMERATED_EXT', maps:from_list(NNL ++ Ext)};
+            {'ENUMERATED', NNL} ->
+                {'ENUMERATED', maps:from_list(NNL)};
+            Other ->
+                Other
+        end,
+    case IntConstr of
+        [] ->
+            Type;
+        _ ->
+            {Type, IntConstr}
+    end.
+
+maybe_legacy_octet_string() ->
+    case asn1ct:use_legacy_types() of
+        true ->
+            legacy_octet_string;
+        false ->
+            octet_string
+    end.
+
+maybe_legacy_bit_string(BitStrType, SizeConstraint) ->
+    Type =
+        case asn1ct:get_bit_string_format() of
+            bitstring ->
+                bit_string;
+            compact ->
+                compact_bit_string;
+            legacy ->
+                legacy_bit_string
+        end,
+    Type1 =
+        case BitStrType of
+            {'BIT STRING', []} ->
+                Type;
+            'BIT STRING' ->
+                Type;
+            {'BIT STRING', NNL} ->
+                {list_to_atom(lists:concat([Type, "_nnl"])), NNL}
+        end,
+    case SizeConstraint of
+        S when is_integer(S) ->
+            {Type1, S};
+        _ ->
+            Type1
+    end.
+
+gen_decode(_, _) ->
+    ok.
+
+gen_inc_decode(_Erules, _Type) ->
+    ok.
+
+gen_decode_selected(_Erules, _Type, _FuncName) ->
+    ok.
+
+gen_decode(_, _, _) ->
+    ok.
+
+gen_dec_prim(_Att, _BytesVar) ->
+    ok.
+
+-spec int_constr(term()) -> [] | {integer(), integer() | 'MAX'}.
+
+int_constr(C) ->
+    case asn1ct_imm:effective_constraint(integer, C) of
+        [{_, []}] ->
+            [];
+        [{'ValueRange', {'MIN', _}}] ->
+            [];
+        [{'ValueRange', {_, _} = Range}] ->
+            Range;
+        [{'SingleValue', Sv}] ->
+            Sv;
+        [] ->
+            []
+    end.
+
+gen_obj_code(_Erules, _Module, _Obj) ->
+    ok.
+
+gen_objectset_code(Erules, ObjSet) ->
+    ObjSetName = ObjSet#typedef.name,
+    Def = ObjSet#typedef.typespec,
+    Set = Def#'ObjectSet'.set,
+    emit([nl, nl, nl,
+          "%%================================",
+          nl,
+          "%%  ",
+          ObjSetName, nl,
+          "%%================================",
+          nl]),
+    FuncName = {asis, typeinfo_func(asn1ct_gen:list2name([ObjSetName]))},
+    SelectValMap =
+        maps:from_list([ 
+                        {SelectVal,
+                         maps:from_list(gen_enc_classtypes(Erules,
+                                                           ObjSetName,
+                                                           [ 
+                                                            TNameType ||
+                                                                TNameType =
+                                                                    {_TypeName,
+                                                                     #typedef{}} <-
+                                                                    TypeList
+                                                           ],
+                                                           []))} ||
+                            {_, SelectVal, TypeList} <- Set
+                       ]),
+    emit([FuncName, "() ->", nl]),
+    emit([{asis, SelectValMap}, ".", nl]).
+
+get_size_constraint(C) ->
+    case lists:keyfind('SizeConstraint', 1, C) of
+        false ->
+            [];
+        {_, {_, []}} ->
+            [];
+        {_, {Sv, Sv}} ->
+            Sv;
+        {_, {_, _} = Tc} ->
+            Tc
+    end.
+
+extaddgroup2sequence(ExtList) when is_list(ExtList) ->
+    lists:filter(fun(#'ExtensionAdditionGroup'{}) ->
+                        false;
+                    ('ExtensionAdditionGroupEnd') ->
+                        false;
+                    (_) ->
+                        true
+                 end,
+                 ExtList).
+
+typeinfo_func(Tname) ->
+    list_to_atom(lists:concat(["typeinfo_", Tname])).
+
+enc_func(Tname) ->
+    list_to_atom(lists:concat(["enc_", Tname])).
+
+
+

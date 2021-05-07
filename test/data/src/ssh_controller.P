@@ -1,0 +1,67 @@
+-file("ssh_controller.erl", 1).
+
+-module(ssh_controller).
+
+-behaviour(gen_server).
+
+-export([start_system_subsystem/7,stop_system/2]).
+
+-export([start_link/2]).
+
+-export([init/1,handle_call/3,handle_cast/2]).
+
+start_link(Role, RegName) ->
+    gen_server:start_link({local, RegName}, ssh_controller, [Role], []).
+
+start_system_subsystem(Controller, Sup, Host, Port, Profile, Options,
+                       ChildSpec) ->
+    gen_server:call(Controller,
+                    {start_system_subsystem, Sup, Host, Port, Profile,
+                     Options, ChildSpec}).
+
+stop_system(Controller, SysSup) ->
+    gen_server:call(Controller, {stop_system, SysSup}).
+
+-record(data,{role}).
+
+init([Role] = _Args) ->
+    {ok, #data{role = Role}}.
+
+handle_call({start_system_subsystem, Sup, Address, Port, Profile,
+             Options, ChildSpec},
+            _From, D) ->
+    try
+        {ok, SystemSup0} =
+            case
+                ssh_system_sup:system_supervisor(Address, Port, Profile)
+            of
+                undefined ->
+                    supervisor:start_child(Sup, ChildSpec);
+                Pid ->
+                    {ok, Pid}
+            end,
+        {SystemSup0,
+         ssh_system_sup:start_subsystem(SystemSup0,
+                                        D#data.role,
+                                        Address, Port, Profile, Options)}
+    of
+        {SystemSup, {ok, SubSysSup}} ->
+            {reply, {ok, {SystemSup, SubSysSup}}, D}
+    catch
+        C:E:S ->
+            {reply, {error, {failed, C, E, S}}, D}
+    end;
+handle_call({stop_system, SysSup}, _From, D) ->
+    case supervisor:which_children(SysSup) of
+        [] ->
+            ssh_system_sup:stop_system(D#data.role, SysSup);
+        _X ->
+            ok
+    end,
+    {reply, ok, D}.
+
+handle_cast(_Request, D) ->
+    {noreply, D}.
+
+
+
